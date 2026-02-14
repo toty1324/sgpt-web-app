@@ -216,7 +216,7 @@ export default function Home() {
               </div>
               <h3 className="text-xl font-bold text-white mb-3 text-center">Instant Decision</h3>
               <p className="text-gray-400 text-center leading-relaxed">
-                Coach receives actionable recommendation with rationale in <3 seconds
+                Coach receives actionable recommendation with rationale in {'<3'} seconds
               </p>
             </div>
           </div>
