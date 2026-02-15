@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-
+import { saveDecision } from '@/lib/db';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -200,7 +200,23 @@ export async function POST(request: Request) {
 
     const decision = completion.choices[0]?.message?.content || 'No response generated';
 
-    return NextResponse.json({ decision });
+// AUTO-SAVE TO DATABASE
+try {
+  await saveDecision({
+    clientName: clientName || 'Unknown',
+    scenario,
+    equipmentStatus: equipment,
+    timeRemaining: timeRemaining ? parseInt(timeRemaining) : undefined,
+    aiDecision: decision,
+    accepted: true,
+  });
+} catch (dbError) {
+  console.error('Failed to save decision:', dbError);
+}
+
+return NextResponse.json({ decision });
+
+    
   } catch (error: any) {
     console.error('OpenAI API error:', error);
     return NextResponse.json(
