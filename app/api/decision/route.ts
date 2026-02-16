@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { saveDecision } from '@/lib/db';
+import { saveDecision } from '@/lib/supabase';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -205,10 +205,9 @@ try {
   await saveDecision({
     clientName: clientName || 'Unknown',
     scenario,
-    equipmentStatus: equipment,
-    timeRemaining: timeRemaining ? parseInt(timeRemaining) : undefined,
     aiDecision: decision,
-    accepted: true,
+    triggerType: 'manual',
+    approved: true,
   });
 } catch (dbError) {
   console.error('Failed to save decision:', dbError);
