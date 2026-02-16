@@ -101,14 +101,32 @@ export default function ClientPage() {
     if (!sessionState) return;
 
     try {
+      // Calculate rest extension for high RPE
+      let restExtension = 0;
+      if (rpe >= 9) {
+        restExtension = 30; // Add 30 seconds
+      } else if (rpe === 8) {
+        restExtension = 15; // Add 15 seconds
+      }
+
+      const newRestTime = (sessionState.rest_remaining_seconds || 90) + restExtension;
+
       await supabase
         .from('session_state')
-        .update({ rpe })
+        .update({ 
+          rpe,
+          rest_remaining_seconds: newRestTime
+        })
         .eq('id', sessionState.id);
 
-      setSessionState({ ...sessionState, rpe });
+      setSessionState({ ...sessionState, rpe, rest_remaining_seconds: newRestTime });
 
-      // Check if RPE is high (trigger alert)
+      // Alert if rest extended
+      if (restExtension > 0) {
+        alert(`High RPE detected! Rest extended by ${restExtension} seconds.`);
+      }
+
+      // Create alert for coach if RPE >= 9
       if (rpe >= 9) {
         await supabase
           .from('alerts')
@@ -116,7 +134,7 @@ export default function ClientPage() {
             session_id: activeSession.id,
             client_id: selectedClient.id,
             alert_type: 'high_rpe',
-            message: `${selectedClient.name} reported RPE ${rpe}`,
+            message: `${selectedClient.name} reported RPE ${rpe} - rest auto-extended`,
             requires_action: false
           });
       }
@@ -129,7 +147,7 @@ export default function ClientPage() {
     if (!sessionState) return;
 
     const painDescription = prompt('Describe the pain (e.g., "Left knee - sharp pain during squat"):');
-    if (!painDescription) return;
+    if (!painDescription) return;flagPain
 
     try {
       // Create alert for coach
@@ -147,6 +165,38 @@ export default function ClientPage() {
     } catch (error) {
       console.error('Error flagging pain:', error);
       alert('Failed to send alert');
+    }
+  }
+  async function completeSet() {
+    if (!sessionState) return;
+
+    try {
+      const response = await fetch('/api/advance-exercise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionStateId: sessionState.id,
+          sessionId: activeSession.id,
+          clientId: selectedClient.id
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.substituted) {
+        alert(`Equipment conflict! Switched to: ${data.to}`);
+      } else if (data.waiting) {
+        alert(`${data.exercise} equipment is occupied. Waiting...`);
+      } else if (data.advanced) {
+        alert(`Next exercise: ${data.exercise}`);
+      } else if (data.nextSet) {
+        alert(`Rest ${data.restSeconds} seconds`);
+      }
+
+      // Reload state will happen via real-time subscription
+    } catch (error) {
+      console.error('Error completing set:', error);
+      alert('Failed to advance');
     }
   }
 
@@ -316,7 +366,14 @@ export default function ClientPage() {
           <div className="text-3xl mb-2">😣</div>
           TAP IF YOU FEEL PAIN
         </button>
-
+{/* Complete Set Button */}
+<button
+          onClick={completeSet}
+          className="w-full bg-green-600 hover:bg-green-700 text-white rounded-lg p-6 font-bold text-lg transition-all"
+        >
+          <div className="text-3xl mb-2">✓</div>
+          COMPLETE SET
+        </button>
         {/* Current equipment in use */}
         {sessionState?.equipment_in_use && sessionState.equipment_in_use.length > 0 && (
           <div className="bg-gray-800 rounded-lg p-4">
