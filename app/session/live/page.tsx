@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-export default function LiveSessionPage() {
+function LiveSessionContent() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('id');
   
@@ -357,5 +357,17 @@ export default function LiveSessionPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LiveSessionPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-xl">Loading session...</div>
+      </div>
+    }>
+      <LiveSessionContent />
+    </Suspense>
   );
 }
