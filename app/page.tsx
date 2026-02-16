@@ -94,6 +94,12 @@ export default function Home() {
               >
                 Learn More
               </a>
+              <a 
+  href="/client" 
+  className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-200 shadow-lg hover:shadow-xl"
+>
+  Client Check-In
+</a>
             </div>
           </div>
         </div>

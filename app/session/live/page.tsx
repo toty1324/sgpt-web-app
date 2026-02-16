@@ -14,6 +14,7 @@ function LiveSessionContent() {
   const [sessionStates, setSessionStates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeRemaining, setTimeRemaining] = useState(60);
+  const [alerts, setAlerts] = useState<any[]>([]);
 
   // Decision form states
   const [decisionClient, setDecisionClient] = useState('');
@@ -41,10 +42,27 @@ function LiveSessionContent() {
         }
       )
       .subscribe();
+      // Subscribe to alerts
+const alertsSubscription = supabase
+.channel('alerts_changes')
+.on(
+  'postgres_changes',
+  {
+    event: 'INSERT',
+    schema: 'public',
+    table: 'alerts',
+    filter: `session_id=eq.${sessionId}`
+  },
+  () => {
+    loadAlerts();
+  }
+)
+.subscribe();
 
-    return () => {
-      stateSubscription.unsubscribe();
-    };
+return () => {
+    stateSubscription.unsubscribe();
+    alertsSubscription.unsubscribe();
+  }; 
   }, [sessionId]);
 
   // Timer countdown
@@ -113,13 +131,45 @@ function LiveSessionContent() {
 
       setEquipment(equipmentWithStatus || []);
 
+      // Load alerts
+      await loadAlerts();
+
     } catch (error) {
       console.error('Error loading session:', error);
     } finally {
       setLoading(false);
     }
   }
+  async function loadAlerts() {
+    try {
+      const { data } = await supabase
+        .from('alerts')
+        .select(`
+          *,
+          clients (name)
+        `)
+        .eq('session_id', sessionId)
+        .eq('resolved', false)
+        .order('created_at', { ascending: false });
+  
+      setAlerts(data || []);
+    } catch (error) {
+      console.error('Error loading alerts:', error);
+    }
+  }
 
+  async function resolveAlert(alertId: string) {
+    try {
+      await supabase
+        .from('alerts')
+        .update({ resolved: true })
+        .eq('id', alertId);
+
+      setAlerts(alerts.filter(a => a.id !== alertId));
+    } catch (error) {
+      console.error('Error resolving alert:', error);
+    }
+  }
   async function getDecision() {
     if (!decisionScenario) {
       alert('Please enter a scenario');
@@ -214,6 +264,36 @@ function LiveSessionContent() {
             </button>
           </div>
         </div>
+
+        {/* Alerts Panel */}
+        {alerts.length > 0 && (
+          <div className="bg-red-900/20 border border-red-600 rounded-lg p-4 mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-bold text-red-400">⚠️ Active Alerts ({alerts.length})</h2>
+            </div>
+            <div className="space-y-2">
+              {alerts.map((alert) => (
+                <div key={alert.id} className="bg-gray-800 rounded p-3 flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="text-white font-semibold mb-1">
+                      {alert.clients?.name}
+                    </div>
+                    <div className="text-gray-300 text-sm">{alert.message}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {new Date(alert.created_at).toLocaleTimeString()}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => resolveAlert(alert.id)}
+                    className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm font-semibold ml-3"
+                  >
+                    Resolve
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-4">
           {/* Left: Clients */}
