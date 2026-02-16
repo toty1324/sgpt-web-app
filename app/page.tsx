@@ -83,6 +83,12 @@ export default function Home() {
                 Try Live Demo
               </a>
               <a 
+  href="/session/setup" 
+  className="bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-200 shadow-lg hover:shadow-xl"
+>
+  Start Session →
+</a>
+              <a 
                 href="#problem" 
                 className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-200 backdrop-blur-sm border border-white/20"
               >
