@@ -84,16 +84,22 @@ return () => {
     try {
       // Get session with participants
       const { data: sessionData } = await supabase
-        .from('sessions')
-        .select(`
-          *,
-          session_participants (
-            id,
-            client_id,
-            checked_in,
-            clients (*)
-          )
-        `)
+  .from('sessions')
+  .select(`
+    *,
+    session_participants (
+      id,
+      client_id,
+      program_id,
+      checked_in,
+      clients (*),
+      programs (
+        id,
+        name,
+        exercises
+      )
+    )
+  `)
         .eq('id', sessionId)
         .single();
 
@@ -323,11 +329,37 @@ return () => {
                         </div>
                       )}
 
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-400">Exercise:</span>
-                          <span className="text-white">#{state?.current_exercise_index || 0}</span>
-                        </div>
+<div className="space-y-2 text-sm">
+  {(() => {
+    const participant = session?.session_participants?.find((p: any) => p.client_id === client.id);
+    const program = participant?.programs;
+    const currentExercise = program?.exercises?.[state?.current_exercise_index || 0];
+    
+    return (
+      <>
+        {program && (
+          <div className="bg-gray-600 rounded p-2 mb-2">
+            <div className="text-xs text-gray-400">Program</div>
+            <div className="text-white font-medium">{program.name}</div>
+          </div>
+        )}
+        {currentExercise && (
+          <div className="bg-blue-900/30 rounded p-2 mb-2">
+            <div className="text-blue-300 font-medium">{currentExercise.exercise_name}</div>
+            <div className="text-xs text-gray-400">
+              {currentExercise.sets} × {currentExercise.reps} reps • {currentExercise.rest_seconds}s rest
+            </div>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span className="text-gray-400">Progress:</span>
+          <span className="text-white">
+            Set {state?.current_set || 1} of {currentExercise?.sets || '?'}
+          </span>
+        </div>
+      </>
+    );
+  })()}
                         <div className="flex justify-between">
                           <span className="text-gray-400">Set:</span>
                           <span className="text-white">{state?.current_set || 1}</span>

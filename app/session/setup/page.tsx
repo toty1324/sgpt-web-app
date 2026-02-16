@@ -11,6 +11,7 @@ export default function SessionSetupPage() {
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [programs, setPrograms] = useState<Record<string, any>>({});
 
   useEffect(() => {
     loadData();
@@ -18,10 +19,22 @@ export default function SessionSetupPage() {
 
   async function loadData() {
     try {
-      const [clientsData, equipmentData] = await Promise.all([
-        getClients(),
-        getEquipment()
-      ]);
+        const [clientsData, equipmentData, programsData] = await Promise.all([
+            getClients(),
+            getEquipment(),
+            supabase.from('programs').select('*')
+          ]);
+          
+          // Map programs by client_id
+          const programsMap: Record<string, any> = {};
+          programsData.data?.forEach(program => {
+            if (!programsMap[program.client_id]) {
+              programsMap[program.client_id] = [];
+            }
+            programsMap[program.client_id].push(program);
+          });
+          
+          setPrograms(programsMap);
       setClients(clientsData);
       setEquipment(equipmentData);
     } catch (error) {
@@ -68,11 +81,17 @@ export default function SessionSetupPage() {
       if (sessionError) throw sessionError;
 
       // Add participants
-      const participants = selectedClients.map(clientId => ({
-        session_id: session.id,
-        client_id: clientId,
-        checked_in: true
-      }));
+      const participants = selectedClients.map(clientId => {
+        const clientPrograms = programs[clientId] || [];
+        const latestProgram = clientPrograms[0]; // Get most recent program
+        
+        return {
+          session_id: session.id,
+          client_id: clientId,
+          program_id: latestProgram?.id || null,
+          checked_in: true
+        };
+      });
 
       const { error: participantsError } = await supabase
         .from('session_participants')
