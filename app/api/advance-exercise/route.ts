@@ -1,168 +1,220 @@
 import { NextResponse } from 'next/server';
-import { supabase, checkEquipmentAvailable, findAlternativeExercise } from '@/lib/supabase';
-import { saveDecision } from '@/lib/supabase';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const SYSTEM_INSTRUCTIONS = `You are the SGPT Logic Assistant. [Your full GPT instructions here]`;
+import { supabase, checkEquipmentAvailable, findAlternativeExercise, saveDecision } from '@/lib/supabase';
 
 export async function POST(request: Request) {
   try {
     const { sessionStateId, sessionId, clientId } = await request.json();
 
+    if (!sessionStateId || !sessionId || !clientId) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
     // Get current session state
-    const { data: state } = await supabase
+    const { data: state, error: stateError } = await supabase
       .from('session_state')
-      .select(`
-        *,
-        sessions!inner (
-          session_participants!inner (
-            programs (exercises)
-          )
-        )
-      `)
+      .select('*')
       .eq('id', sessionStateId)
       .single();
 
-    if (!state) throw new Error('Session state not found');
+    if (stateError || !state) {
+      return NextResponse.json({ error: 'Session state not found' }, { status: 404 });
+    }
 
-    const program = state.sessions.session_participants[0]?.programs;
-    if (!program?.exercises) throw new Error('No program found');
+    // Get client's program for this session
+    const { data: participant } = await supabase
+      .from('session_participants')
+      .select(`
+        programs (
+          id,
+          exercises
+        )
+      `)
+      .eq('session_id', sessionId)
+      .eq('client_id', clientId)
+      .single();
 
-    const exercises = program.exercises;
-    const currentIndex = state.current_exercise_index;
-    const currentSet = state.current_set;
-    const currentExercise = exercises[currentIndex];
+      if (!participant?.programs) {
+      return NextResponse.json({ error: 'No program found for client' }, { status: 404 });
+    }
 
-    // Check if current exercise is complete
+    const program = Array.isArray(participant.programs) ? participant.programs[0] : participant.programs;
+const programExercises = program?.exercises;
+    const currentIndex = state.current_exercise_index || 0;
+    const currentSet = state.current_set || 1;
+    const currentExercise = programExercises[currentIndex];
+
+    if (!currentExercise) {
+      return NextResponse.json({ error: 'Current exercise not found' }, { status: 404 });
+    }
+
+    // Check if this completes all sets of current exercise
     if (currentSet >= currentExercise.sets) {
-      // Move to next exercise
+      // ── ADVANCE TO NEXT EXERCISE ──
       const nextIndex = currentIndex + 1;
-      
-      if (nextIndex >= exercises.length) {
-        // Program complete
+
+      // Check if program is complete
+      if (nextIndex >= programExercises.length) {
         await supabase
           .from('session_state')
-          .update({ status: 'complete', equipment_in_use: [] })
+          .update({ 
+            status: 'complete', 
+            equipment_in_use: [],
+            current_set: currentSet
+          })
           .eq('id', sessionStateId);
 
-        return NextResponse.json({ message: 'Program complete!' });
+        return NextResponse.json({ complete: true });
       }
 
-      // Get next exercise
-      const nextExercise = exercises[nextIndex];
-      const { data: exerciseData } = await supabase
+      // Get next exercise details
+      const nextProgramExercise = programExercises[nextIndex];
+
+      const { data: nextExerciseData } = await supabase
         .from('exercises')
         .select('*')
-        .eq('id', nextExercise.exercise_id)
+        .eq('id', nextProgramExercise.exercise_id)
         .single();
 
-      if (!exerciseData) throw new Error('Exercise not found');
+      if (!nextExerciseData) {
+        return NextResponse.json({ error: 'Next exercise not found' }, { status: 404 });
+      }
 
-      // Check equipment availability
-      const available = await checkEquipmentAvailable(sessionId, exerciseData.required_equipment);
+      const requiredEquipment = nextExerciseData.required_equipment || [];
 
-      if (!available) {
-        // EQUIPMENT CONFLICT DETECTED
-        const alternative = await findAlternativeExercise(nextExercise.exercise_id, sessionId);
+      // ── EQUIPMENT CONFLICT CHECK ──
+      if (requiredEquipment.length > 0) {
+        const equipCheck = await checkEquipmentAvailable(sessionId, requiredEquipment);
 
-        if (alternative) {
-          // Auto-substitute
-          await supabase
-            .from('session_state')
-            .update({
-              current_exercise_index: nextIndex,
-              current_set: 1,
-              equipment_in_use: alternative.required_equipment,
-              status: 'active'
-            })
-            .eq('id', sessionStateId);
+        console.log('Equipment availability check:', equipCheck);
 
-          // Log decision
-          await saveDecision({
-            sessionId,
-            clientId,
-            triggerType: 'equipment_conflict',
-            scenario: `${exerciseData.name} equipment occupied`,
-            aiDecision: `Auto-substituted: ${alternative.name}`,
-            requiresApproval: false,
-            approved: true,
-            clientName: 'Auto-system'
-          });
+        if (!equipCheck.available) {
+          // CONFLICT DETECTED
+          console.log(`Conflict detected for ${nextExerciseData.name}:`, equipCheck.conflicts);
 
-          // Create alert
-          await supabase
-            .from('alerts')
-            .insert({
-              session_id: sessionId,
-              client_id: clientId,
-              alert_type: 'equipment_conflict',
-              message: `Auto-substituted ${exerciseData.name} → ${alternative.name} (equipment conflict)`,
-              requires_action: false
+          // Try to find an alternative exercise
+          const alternative = await findAlternativeExercise(
+            nextProgramExercise.exercise_id, 
+            sessionId
+          );
+
+          if (alternative) {
+            // AUTO-SUBSTITUTE
+            console.log('Auto-substituting to:', alternative.name);
+
+            await supabase
+              .from('session_state')
+              .update({
+                current_exercise_index: nextIndex,
+                current_set: 1,
+                equipment_in_use: alternative.required_equipment || [],
+                status: 'active',
+                rpe: null
+              })
+              .eq('id', sessionStateId);
+
+            await saveDecision({
+              sessionId,
+              clientId,
+              clientName: 'Auto-system',
+              triggerType: 'equipment_conflict',
+              scenario: `${nextExerciseData.name} unavailable - ${equipCheck.conflicts.join(', ')} occupied`,
+              aiDecision: `Auto-substituted to ${alternative.name} (same movement pattern: ${alternative.movement_pattern})`,
+              requiresApproval: false,
+              approved: true
             });
 
-          return NextResponse.json({ 
-            substituted: true,
-            from: exerciseData.name,
-            to: alternative.name
-          });
-        } else {
-          // No alternative - create alert for coach
-          await supabase
-            .from('alerts')
-            .insert({
-              session_id: sessionId,
-              client_id: clientId,
-              alert_type: 'equipment_conflict',
-              message: `${exerciseData.name} equipment occupied - no alternatives available`,
-              requires_action: true
+            await supabase
+              .from('alerts')
+              .insert({
+                session_id: sessionId,
+                client_id: clientId,
+                alert_type: 'equipment_conflict',
+                message: `Equipment conflict resolved: ${nextExerciseData.name} → ${alternative.name} (${equipCheck.conflicts.join(', ')} occupied)`,
+                requires_action: false
+              });
+
+            return NextResponse.json({
+              substituted: true,
+              from: nextExerciseData.name,
+              to: alternative.name,
+              reason: `${equipCheck.conflicts.join(', ')} occupied`
             });
 
-          return NextResponse.json({ 
-            waiting: true,
-            exercise: exerciseData.name
-          });
+          } else {
+            // NO ALTERNATIVE - CLIENT WAITS
+            console.log('No alternatives available - creating alert');
+
+            await supabase
+              .from('session_state')
+              .update({
+                status: 'waiting',
+                equipment_in_use: [],
+                rpe: null
+              })
+              .eq('id', sessionStateId);
+
+            await supabase
+              .from('alerts')
+              .insert({
+                session_id: sessionId,
+                client_id: clientId,
+                alert_type: 'equipment_conflict',
+                message: `${nextExerciseData.name} cannot proceed - ${equipCheck.conflicts.join(', ')} all occupied. No alternatives found. Client waiting.`,
+                requires_action: true
+              });
+
+            return NextResponse.json({
+              waiting: true,
+              exercise: nextExerciseData.name,
+              conflicts: equipCheck.conflicts
+            });
+          }
         }
       }
 
-      // Equipment available - proceed normally
+      // ── EQUIPMENT AVAILABLE - ADVANCE NORMALLY ──
       await supabase
         .from('session_state')
         .update({
           current_exercise_index: nextIndex,
           current_set: 1,
-          equipment_in_use: exerciseData.required_equipment,
-          status: 'active'
+          equipment_in_use: requiredEquipment,
+          status: 'active',
+          rpe: null
         })
         .eq('id', sessionStateId);
 
-      return NextResponse.json({ 
+      return NextResponse.json({
         advanced: true,
-        exercise: exerciseData.name
+        exercise: nextExerciseData.name,
+        sets: nextProgramExercise.sets,
+        reps: nextProgramExercise.reps
       });
 
     } else {
-      // Move to next set
+      // ── ADVANCE TO NEXT SET ──
+      const restSeconds = currentExercise.rest_seconds || 90;
+
       await supabase
         .from('session_state')
         .update({
           current_set: currentSet + 1,
           status: 'resting',
-          rest_remaining_seconds: currentExercise.rest_seconds
+          equipment_in_use: [], // Release equipment during rest
+          rest_remaining_seconds: restSeconds,
+          rpe: null
         })
         .eq('id', sessionStateId);
 
-      return NextResponse.json({ 
+      return NextResponse.json({
         nextSet: currentSet + 1,
-        restSeconds: currentExercise.rest_seconds
+        totalSets: currentExercise.sets,
+        restSeconds
       });
     }
 
   } catch (error: any) {
-    console.error('Error advancing exercise:', error);
+    console.error('Advance exercise error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

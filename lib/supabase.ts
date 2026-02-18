@@ -186,76 +186,126 @@ export async function assignEquipment(sessionStateId: string, exerciseId: string
   }
   
   // Check if equipment is available
-  export async function checkEquipmentAvailable(sessionId: string, requiredEquipment: string[]): Promise<boolean> {
-    try {
-      // Get all active session states
-      const { data: states } = await supabase
-        .from('session_state')
-        .select('equipment_in_use')
-        .eq('session_id', sessionId)
-        .eq('status', 'active');
-  
-      // Get equipment quantities
-      const { data: equipment } = await supabase
-        .from('equipment')
-        .select('name, quantity')
-        .in('name', requiredEquipment);
-  
-      // Count usage
-      const inUse: Record<string, number> = {};
-      states?.forEach(state => {
-        state.equipment_in_use?.forEach((equip: string) => {
+export async function checkEquipmentAvailable(
+  sessionId: string, 
+  requiredEquipment: string[]
+): Promise<{available: boolean, conflicts: string[]}> {
+  try {
+    if (!requiredEquipment || requiredEquipment.length === 0) {
+      return { available: true, conflicts: [] };
+    }
+
+    // Get all active session states
+    const { data: states } = await supabase
+      .from('session_state')
+      .select('equipment_in_use, status')
+      .eq('session_id', sessionId)
+      .in('status', ['active', 'resting']);
+
+    // Get equipment quantities from database
+    const { data: equipment } = await supabase
+      .from('equipment')
+      .select('name, quantity')
+      .in('name', requiredEquipment);
+
+    // Count current usage
+    const inUse: Record<string, number> = {};
+    states?.forEach(state => {
+      if (state.equipment_in_use && Array.isArray(state.equipment_in_use)) {
+        state.equipment_in_use.forEach((equip: string) => {
           inUse[equip] = (inUse[equip] || 0) + 1;
         });
-      });
-  
-      // Check availability
-      for (const item of equipment || []) {
-        const used = inUse[item.name] || 0;
-        if (used >= item.quantity) {
-          return false; // Not available
-        }
       }
-  
-      return true; // All equipment available
-    } catch (error) {
-      console.error('Error checking equipment:', error);
-      return false;
+    });
+
+    // Check each required piece of equipment
+    const conflicts: string[] = [];
+    
+    for (const reqEquip of requiredEquipment) {
+      const equipItem = equipment?.find(e => e.name === reqEquip);
+      
+      if (!equipItem) {
+        console.warn(`Equipment not found in database: ${reqEquip}`);
+        continue;
+      }
+
+      const currentlyInUse = inUse[equipItem.name] || 0;
+      
+      console.log(`Equipment check: ${equipItem.name} - ${currentlyInUse}/${equipItem.quantity} in use`);
+      
+      if (currentlyInUse >= equipItem.quantity) {
+        conflicts.push(equipItem.name);
+      }
     }
+
+    return {
+      available: conflicts.length === 0,
+      conflicts: conflicts
+    };
+
+  } catch (error) {
+    console.error('Error checking equipment availability:', error);
+    return { available: false, conflicts: [] };
   }
+}
   
   // Find alternative exercise when equipment conflict
-  export async function findAlternativeExercise(exerciseId: string, sessionId: string) {
+  export async function findAlternativeExercise(
+    exerciseId: string, 
+    sessionId: string
+  ) {
     try {
+      // Get the conflicted exercise details
       const { data: exercise } = await supabase
         .from('exercises')
-        .select('*, substitutions')
+        .select('name, movement_pattern, required_equipment')
         .eq('id', exerciseId)
         .single();
   
-      if (!exercise?.substitutions || exercise.substitutions.length === 0) {
+      if (!exercise) {
+        console.log('Exercise not found');
         return null;
       }
   
-      // Check each substitution for availability
-      for (const subId of exercise.substitutions) {
-        const { data: sub } = await supabase
-          .from('exercises')
-          .select('*')
-          .eq('id', subId)
-          .single();
+      console.log(`Finding alternative for: ${exercise.name} (${exercise.movement_pattern})`);
   
-        if (sub && sub.required_equipment) {
-          const available = await checkEquipmentAvailable(sessionId, sub.required_equipment);
-          if (available) {
-            return sub; // Found available alternative
-          }
+      // Find all exercises with same movement pattern
+      const { data: alternatives } = await supabase
+        .from('exercises')
+        .select('*')
+        .eq('movement_pattern', exercise.movement_pattern)
+        .neq('id', exerciseId);
+  
+      if (!alternatives || alternatives.length === 0) {
+        console.log('No alternatives with same movement pattern');
+        return null;
+      }
+  
+      console.log(`Found ${alternatives.length} potential alternatives`);
+  
+      // Check each alternative for equipment availability
+      for (const alt of alternatives) {
+        // Bodyweight exercises always available
+        if (!alt.required_equipment || alt.required_equipment.length === 0) {
+          console.log(`Found bodyweight alternative: ${alt.name}`);
+          return alt;
+        }
+  
+        const equipCheck = await checkEquipmentAvailable(sessionId, alt.required_equipment);
+        
+        console.log(`Checking alternative ${alt.name}:`, equipCheck);
+        
+        if (equipCheck.available) {
+          console.log(`Found available alternative: ${alt.name}`);
+          return alt;
         }
       }
   
-      return null; // No alternatives available
+      console.log('No available alternatives found');
+      return null;
+  
     } catch (error) {
-      console.error('Error finding alternative:', error);
+      console.error('Error finding alternative exercise:', error);
       return null;
     }
   }

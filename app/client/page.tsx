@@ -168,7 +168,10 @@ export default function ClientPage() {
     }
   }
   async function completeSet() {
-    if (!sessionState) return;
+    if (!sessionState) {
+      alert('No active session state found');
+      return;
+    }
 
     try {
       const response = await fetch('/api/advance-exercise', {
@@ -181,22 +184,28 @@ export default function ClientPage() {
         })
       });
 
-      const data = await response.json();
-
-      if (data.substituted) {
-        alert(`Equipment conflict! Switched to: ${data.to}`);
-      } else if (data.waiting) {
-        alert(`${data.exercise} equipment is occupied. Waiting...`);
-      } else if (data.advanced) {
-        alert(`Next exercise: ${data.exercise}`);
-      } else if (data.nextSet) {
-        alert(`Rest ${data.restSeconds} seconds`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to advance exercise');
       }
 
-      // Reload state will happen via real-time subscription
-    } catch (error) {
+      const data = await response.json();
+
+      if (data.complete) {
+        alert('🎉 Workout complete! Great work today!');
+      } else if (data.substituted) {
+        alert(`⚠️ Equipment Conflict!\n\n${data.from} is not available.\n\nSwitching to: ${data.to}\n\nReason: ${data.reason}\n\nCoach has been notified.`);
+      } else if (data.waiting) {
+        alert(`⏸️ Equipment Occupied\n\n${data.exercise} cannot start.\n\nEquipment in use: ${data.conflicts?.join(', ')}\n\nNo alternatives available.\nPlease wait for coach instruction.`);
+      } else if (data.advanced) {
+        alert(`✅ Next Exercise: ${data.exercise}\n\n${data.sets} sets × ${data.reps} reps`);
+      } else if (data.nextSet) {
+        alert(`✅ Set Complete!\n\nRest for ${data.restSeconds} seconds.\n\nNext: Set ${data.nextSet} of ${data.totalSets}`);
+      }
+
+    } catch (error: any) {
       console.error('Error completing set:', error);
-      alert('Failed to advance');
+      alert('Error: ' + error.message);
     }
   }
 
