@@ -8,6 +8,7 @@ export default function ClientPage() {
   const [availableClients, setAvailableClients] = useState<any[]>([]);
   const [selectedClient, setSelectedClient] = useState<any>(null);
   const [sessionState, setSessionState] = useState<any>(null);
+  const [currentExercise, setCurrentExercise] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,6 +39,52 @@ export default function ClientPage() {
       subscription.unsubscribe();
     };
   }, [selectedClient, activeSession]);
+
+  // Load current exercise details whenever session state changes
+  useEffect(() => {
+    if (!sessionState || !activeSession || !selectedClient) return;
+
+    async function loadExerciseDetails() {
+      try {
+        // Get client's program
+        const { data: participant } = await supabase
+          .from('session_participants')
+          .select('program_id, programs(exercises)')
+          .eq('session_id', activeSession.id)
+          .eq('client_id', selectedClient.id)
+          .single();
+
+        const program = participant?.programs
+          ? (Array.isArray(participant.programs) ? participant.programs[0] : participant.programs)
+          : null;
+        if (program?.exercises) {
+          const exercises = program.exercises;
+          const currentIndex = sessionState.current_exercise_index || 0;
+          const programExercise = exercises[currentIndex];
+
+          if (programExercise) {
+            // Get full exercise details
+            const { data: exercise } = await supabase
+              .from('exercises')
+              .select('*')
+              .eq('id', programExercise.exercise_id)
+              .single();
+
+            setCurrentExercise({
+              ...exercise,
+              sets: programExercise.sets,
+              reps: programExercise.reps,
+              rest_seconds: programExercise.rest_seconds
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error loading exercise details:', error);
+      }
+    }
+
+    loadExerciseDetails();
+  }, [sessionState, activeSession, selectedClient]);
 
   async function loadActiveSession() {
     try {
@@ -147,7 +194,7 @@ export default function ClientPage() {
     if (!sessionState) return;
 
     const painDescription = prompt('Describe the pain (e.g., "Left knee - sharp pain during squat"):');
-    if (!painDescription) return;flagPain
+    if (!painDescription) return;
 
     try {
       // Create alert for coach
@@ -167,6 +214,7 @@ export default function ClientPage() {
       alert('Failed to send alert');
     }
   }
+
   async function completeSet() {
     if (!sessionState) {
       alert('No active session state found');
@@ -317,8 +365,13 @@ export default function ClientPage() {
             <div className="bg-gray-700 rounded-lg p-4">
               <div className="text-sm text-gray-400 mb-1">Exercise</div>
               <div className="text-xl font-bold text-white">
-                Exercise #{(sessionState?.current_exercise_index || 0) + 1}
+                {currentExercise?.name || `Exercise #${(sessionState?.current_exercise_index || 0) + 1}`}
               </div>
+              {currentExercise && (
+                <div className="text-gray-400 text-sm mt-1">
+                  {currentExercise.sets} sets × {currentExercise.reps} reps • {currentExercise.rest_seconds}s rest
+                </div>
+              )}
               <div className="text-gray-300 text-sm mt-2">
                 Set {sessionState?.current_set || 1}
               </div>
@@ -375,14 +428,16 @@ export default function ClientPage() {
           <div className="text-3xl mb-2">😣</div>
           TAP IF YOU FEEL PAIN
         </button>
-{/* Complete Set Button */}
-<button
+
+        {/* Complete Set Button */}
+        <button
           onClick={completeSet}
           className="w-full bg-green-600 hover:bg-green-700 text-white rounded-lg p-6 font-bold text-lg transition-all"
         >
           <div className="text-3xl mb-2">✓</div>
           COMPLETE SET
         </button>
+
         {/* Current equipment in use */}
         {sessionState?.equipment_in_use && sessionState.equipment_in_use.length > 0 && (
           <div className="bg-gray-800 rounded-lg p-4">
