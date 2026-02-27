@@ -37,7 +37,12 @@ function LiveSessionContent() {
           table: 'session_state',
           filter: `session_id=eq.${sessionId}`
         },
-        () => {
+        (payload: { new?: { current_exercise_index?: number }; old?: { current_exercise_index?: number } }) => {
+          // Refresh exercise details if exercise changed; otherwise reload on any change to keep UI in sync
+          if (payload.new?.current_exercise_index !== payload.old?.current_exercise_index) {
+            loadSessionData();
+            return;
+          }
           loadSessionData();
         }
       )
