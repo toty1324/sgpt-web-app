@@ -337,13 +337,20 @@ function LiveSessionContent() {
                         {(() => {
                           const participant = session?.session_participants?.find((p: any) => p.client_id === client.id);
                           const program = participant?.programs;
-                          const currentExercise = program?.exercises?.[state?.current_exercise_index || 0];
-                          
-                          // CRITICAL FIX: Use current_exercise from state if it exists (for substitutions)
-                          // Otherwise fall back to program exercise
-                          const displayExercise = state?.current_exercise || currentExercise;
-                          const displayExerciseName = displayExercise?.exercise_name || displayExercise?.name || 'No exercise';
-                          
+                          const programExercise = program?.exercises?.[state?.current_exercise_index ?? 0];
+
+                          // Prefer substituted exercise from session_state when present,
+                          // but fall back to the program exercise (and its sets/reps/rest).
+                          const stateExercise = state?.current_exercise;
+                          const displayExercise = stateExercise
+                            ? { ...programExercise, ...stateExercise }
+                            : programExercise;
+                          const displayExerciseName =
+                            stateExercise?.name ||
+                            stateExercise?.exercise_name ||
+                            displayExercise?.name ||
+                            'No exercise';
+
                           return (
                             <>
                               {program && (
@@ -363,7 +370,7 @@ function LiveSessionContent() {
                               <div className="flex justify-between">
                                 <span className="text-gray-400">Progress:</span>
                                 <span className="text-white">
-                                  Set {state?.current_set || 1} of {displayExercise?.sets || '?'}
+                                  Set {state?.current_set || 1} of {displayExercise?.sets ?? '?'}
                                 </span>
                               </div>
                             </>
