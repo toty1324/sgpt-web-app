@@ -243,6 +243,24 @@ export default function ClientPage() {
         alert('🎉 Workout complete! Great work today!');
       } else if (data.substituted) {
         alert(`⚠️ Equipment Conflict!\n\n${data.from} is not available.\n\nSwitching to: ${data.to}\n\nReason: ${data.reason}\n\nCoach has been notified.`);
+
+        // Reload exercise details after substitution
+        if (data.exerciseId) {
+          const { data: newExercise } = await supabase
+            .from('exercises')
+            .select('*')
+            .eq('id', data.exerciseId)
+            .single();
+          
+          if (newExercise) {
+            setCurrentExercise({
+              ...newExercise,
+              sets: data.sets || 2,
+              reps: data.reps || 10,
+              rest_seconds: data.restSeconds || 60
+            });
+          }
+        }
       } else if (data.waiting) {
         alert(`⏸️ Equipment Occupied\n\n${data.exercise} cannot start.\n\nEquipment in use: ${data.conflicts?.join(', ')}\n\nNo alternatives available.\nPlease wait for coach instruction.`);
       } else if (data.advanced) {

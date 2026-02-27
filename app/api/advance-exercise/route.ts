@@ -137,6 +137,7 @@ const programExercises = program?.exercises;
               substituted: true,
               from: nextExerciseData.name,
               to: alternative.name,
+              exerciseId: alternative.id,
               reason: `${equipCheck.conflicts.join(', ')} occupied`
             });
 
