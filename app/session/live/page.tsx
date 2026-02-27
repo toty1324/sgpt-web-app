@@ -37,37 +37,33 @@ function LiveSessionContent() {
           table: 'session_state',
           filter: `session_id=eq.${sessionId}`
         },
-        (payload: { new?: { current_exercise_index?: number }; old?: { current_exercise_index?: number } }) => {
-          // Refresh exercise details if exercise changed; otherwise reload on any change to keep UI in sync
-          if (payload.new?.current_exercise_index !== payload.old?.current_exercise_index) {
-            loadSessionData();
-            return;
-          }
+        () => {
           loadSessionData();
         }
       )
       .subscribe();
-      // Subscribe to alerts
-const alertsSubscription = supabase
-.channel('alerts_changes')
-.on(
-  'postgres_changes',
-  {
-    event: 'INSERT',
-    schema: 'public',
-    table: 'alerts',
-    filter: `session_id=eq.${sessionId}`
-  },
-  () => {
-    loadAlerts();
-  }
-)
-.subscribe();
+      
+    // Subscribe to alerts
+    const alertsSubscription = supabase
+      .channel('alerts_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'alerts',
+          filter: `session_id=eq.${sessionId}`
+        },
+        () => {
+          loadAlerts();
+        }
+      )
+      .subscribe();
 
-return () => {
-    stateSubscription.unsubscribe();
-    alertsSubscription.unsubscribe();
-  }; 
+    return () => {
+      stateSubscription.unsubscribe();
+      alertsSubscription.unsubscribe();
+    }; 
   }, [sessionId]);
 
   // Timer countdown
@@ -89,22 +85,22 @@ return () => {
     try {
       // Get session with participants
       const { data: sessionData } = await supabase
-  .from('sessions')
-  .select(`
-    *,
-    session_participants (
-      id,
-      client_id,
-      program_id,
-      checked_in,
-      clients (*),
-      programs (
-        id,
-        name,
-        exercises
-      )
-    )
-  `)
+        .from('sessions')
+        .select(`
+          *,
+          session_participants (
+            id,
+            client_id,
+            program_id,
+            checked_in,
+            clients (*),
+            programs (
+              id,
+              name,
+              exercises
+            )
+          )
+        `)
         .eq('id', sessionId)
         .single();
 
@@ -151,6 +147,7 @@ return () => {
       setLoading(false);
     }
   }
+  
   async function loadAlerts() {
     try {
       const { data } = await supabase
@@ -181,6 +178,7 @@ return () => {
       console.error('Error resolving alert:', error);
     }
   }
+  
   async function getDecision() {
     if (!decisionScenario) {
       alert('Please enter a scenario');
@@ -323,6 +321,7 @@ return () => {
                           ${state?.status === 'active' ? 'bg-green-600' : ''}
                           ${state?.status === 'resting' ? 'bg-yellow-600' : ''}
                           ${state?.status === 'ready' ? 'bg-gray-600' : ''}
+                          ${state?.status === 'waiting' ? 'bg-orange-600' : ''}
                         `}>
                           {state?.status?.toUpperCase() || 'READY'}
                         </div>
@@ -334,41 +333,43 @@ return () => {
                         </div>
                       )}
 
-<div className="space-y-2 text-sm">
-  {(() => {
-    const participant = session?.session_participants?.find((p: any) => p.client_id === client.id);
-    const program = participant?.programs;
-    const currentExercise = program?.exercises?.[state?.current_exercise_index || 0];
-    
-    return (
-      <>
-        {program && (
-          <div className="bg-gray-600 rounded p-2 mb-2">
-            <div className="text-xs text-gray-400">Program</div>
-            <div className="text-white font-medium">{program.name}</div>
-          </div>
-        )}
-        {currentExercise && (
-          <div className="bg-blue-900/30 rounded p-2 mb-2">
-            <div className="text-blue-300 font-medium">{currentExercise.exercise_name}</div>
-            <div className="text-xs text-gray-400">
-              {currentExercise.sets} × {currentExercise.reps} reps • {currentExercise.rest_seconds}s rest
-            </div>
-          </div>
-        )}
-        <div className="flex justify-between">
-          <span className="text-gray-400">Progress:</span>
-          <span className="text-white">
-            Set {state?.current_set || 1} of {currentExercise?.sets || '?'}
-          </span>
-        </div>
-      </>
-    );
-  })()}
-                        <div className="flex justify-between">
-                          <span className="text-gray-400">Set:</span>
-                          <span className="text-white">{state?.current_set || 1}</span>
-                        </div>
+                      <div className="space-y-2 text-sm">
+                        {(() => {
+                          const participant = session?.session_participants?.find((p: any) => p.client_id === client.id);
+                          const program = participant?.programs;
+                          const currentExercise = program?.exercises?.[state?.current_exercise_index || 0];
+                          
+                          // CRITICAL FIX: Use current_exercise from state if it exists (for substitutions)
+                          // Otherwise fall back to program exercise
+                          const displayExercise = state?.current_exercise || currentExercise;
+                          const displayExerciseName = displayExercise?.exercise_name || displayExercise?.name || 'No exercise';
+                          
+                          return (
+                            <>
+                              {program && (
+                                <div className="bg-gray-600 rounded p-2 mb-2">
+                                  <div className="text-xs text-gray-400">Program</div>
+                                  <div className="text-white font-medium">{program.name}</div>
+                                </div>
+                              )}
+                              {displayExercise && (
+                                <div className="bg-blue-900/30 rounded p-2 mb-2">
+                                  <div className="text-blue-300 font-medium">{displayExerciseName}</div>
+                                  <div className="text-xs text-gray-400">
+                                    {displayExercise.sets} × {displayExercise.reps} reps • {displayExercise.rest_seconds}s rest
+                                  </div>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Progress:</span>
+                                <span className="text-white">
+                                  Set {state?.current_set || 1} of {displayExercise?.sets || '?'}
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                        
                         {state?.rpe && (
                           <div className="flex justify-between">
                             <span className="text-gray-400">RPE:</span>
